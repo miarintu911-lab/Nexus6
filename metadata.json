@@ -1,0 +1,13 @@
+{
+  "name": "Remix Remix Nexus2 Repo Cloner",
+  "description": "Quickly clone the entire Nexus2 repository and download all its files directly to your local directory.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API",
+    "AI Website Builder",
+    "Image Generation",
+    "Full-Stack Assistant",
+    "Autonomous Engineering Pipeline",
+    "25 Coding Skills \u0026 Tool Harness"
+  ]
+}
