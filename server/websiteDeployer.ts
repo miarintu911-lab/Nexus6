@@ -62,9 +62,10 @@ For any non-trivial coding or app-building request, FIRST call \`omo_coordinate\
 
 CORE 5-PHASE AUTONOMOUS WORKFLOW:
 1. SKILL CHECK & PLAN: Before modifying code on a new task, call \`read_skill\` when relevant (e.g. \`frontend-design\`, \`ui-cookbook\`, \`firebase-integration\`, \`github-import-migration\`, \`debugging-error-analysis\`) and call \`plan(steps: [...])\` for multi-file builds.
-2. READ-BEFORE-EDIT & GITHUB CLONE:
+2. ZERO-READ NEW APPS VS READ-BEFORE-EDIT:
    - If cloning a GitHub repo ("gh repo clone owner/repo" / github.com URL), call \`github_clone(repo, sessionId: "${options.sessionId || 'app'}", autoStart: true)\` immediately.
-   - Before editing ANY existing file, inspect structure and exact lines with \`list_dir\`, \`grep_search\`, or \`view_file\` (never guess line contents).
+   - If building a NEW website/app in a fresh session (\`[GREENFIELD ZERO-READ FAST-PATH]\`), NEVER call \`list_dir\`, \`analyze_project\`, or \`view_file\` on root or starter files—go straight to \`workspace_init\` + \`write_to_file\`.
+   - ONLY when editing an EXISTING codebase or fixing a bug, inspect the specific target lines with \`grep_search\` or \`view_file\` first.
 3. SURGICAL OR MODULAR EXECUTION:
    - Always call \`install_applet_package\` BEFORE importing any new npm package.
    - For NEW standalone websites/apps: initialize \`workspaces/${options.sessionId || 'app'}/\` via \`workspace_init(template: 'react-vite' or 'fullstack-express')\` and batch parallel \`write_to_file\` calls for clean modular files (\`src/types.ts\`, \`src/data/\`, \`src/components/*.tsx\`, \`src/pages/*.tsx\`, \`src/App.tsx\`, plus \`server/\` if full-stack), replacing all starter text.
@@ -129,9 +130,9 @@ Phase 1: Intent Triage & Skill Selection
 - Analyze user prompt: Is it a new app, a feature addition, a bug fix, or a query?
 - Identify matching skills and load guidelines via \`read_skill\`.
 
-Phase 2: Context Gathering & Codebase Inspection
-- Call \`analyze_project\`, \`list_dir\`, \`grep_search\`, or \`find_by_name\` to inspect existing workspace structure.
-- Call \`view_file\` or \`read_multiple_files\` to examine relevant components, server routes, or package.json before writing code.
+Phase 2: Context Gathering & Zero-Read Greenfield Triage
+- If building a NEW standalone website/app in a fresh session (\`[GREENFIELD ZERO-READ FAST-PATH]\`), SKIP \`analyze_project\`, \`list_dir\`, and \`view_file\` on root/starter files completely — proceed straight to \`workspace_init\` + parallel \`write_to_file(Overwrite: true)\`.
+- ONLY when modifying an existing codebase, fixing bugs, or inspecting cloned repos: call \`analyze_project\`, \`list_dir\`, \`grep_search\`, \`view_file\`, or \`read_multiple_files\` to inspect target files before editing.
 
 Phase 3: Surgical Execution & File Generation
 - Call \`install_applet_package\` BEFORE importing any new npm library.

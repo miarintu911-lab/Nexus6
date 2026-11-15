@@ -65,6 +65,8 @@ export async function initSessionWorkspace(
   proxyUrl: string;
   template: WorkspaceTemplate;
   createdFiles: string[];
+  preLinkedPackages: string[];
+  zeroReadContract: string;
 }> {
   const safeId = sanitizeSessionId(sessionId);
   const wsDir = getWorkspaceDir(safeId);
@@ -431,6 +433,8 @@ boot();
     proxyUrl: `/w/${safeId}/`,
     template,
     createdFiles,
+    preLinkedPackages: ['react', 'react-dom', 'lucide-react', 'clsx', 'tailwind-merge', 'motion', 'express', 'cors'],
+    zeroReadContract: `Starter config and entry files (package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx, src/index.css) are already configured with Tailwind v4 + React 19 + lucide-react + motion. Do NOT call view_file or list_dir on them. Immediately overwrite workspaces/${safeId}/src/types.ts, src/data/*, src/components/*.tsx, src/pages/*.tsx, and src/App.tsx using parallel write_to_file(Overwrite: true) calls.`,
   };
 }
 

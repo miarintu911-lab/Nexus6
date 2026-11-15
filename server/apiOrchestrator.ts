@@ -15,6 +15,7 @@ import {
   buildHarnessPreFlightContext,
   checkApiContracts,
   extractTargetedErrorContext,
+  isFreshGreenfieldWebsiteBuild,
   isGitHubClonePrompt,
   lookupErrorKnowledgeBase,
   recordErrorFixResolution,
@@ -1777,29 +1778,44 @@ function selectRelevantTools(
   declarations: FunctionDeclaration[],
   promptText: string,
   mode: string,
-  compactMode: boolean
+  compactMode: boolean,
+  isGreenfield: boolean = false
 ): FunctionDeclaration[] {
-  const baseTools = new Set([
-    'view_file',
-    'write_to_file',
-    'replace_file_content',
-    'multi_replace_file_content',
-    'list_dir',
-    'grep_search',
-    'codebase_graph',
-    'ast_context_ranker',
-    'verify_live_preview',
-    'compile_applet',
-    'lint_applet',
-    'git_checkpoint',
-    'read_multiple_files',
-    'compute_file_diff',
-    'read_skill',
-    'plan',
-  ]);
+  const baseTools = new Set(
+    isGreenfield
+      ? [
+          'write_to_file',
+          'replace_file_content',
+          'multi_replace_file_content',
+          'view_file',
+          'verify_live_preview',
+          'compile_applet',
+          'lint_applet',
+          'read_skill',
+          'plan',
+        ]
+      : [
+          'view_file',
+          'write_to_file',
+          'replace_file_content',
+          'multi_replace_file_content',
+          'list_dir',
+          'grep_search',
+          'codebase_graph',
+          'ast_context_ranker',
+          'verify_live_preview',
+          'compile_applet',
+          'lint_applet',
+          'git_checkpoint',
+          'read_multiple_files',
+          'compute_file_diff',
+          'read_skill',
+          'plan',
+        ]
+  );
 
   const lower = (promptText || '').toLowerCase();
-  if (/(install|package|npm|react|express|server|backend|api|build|typescript|vite|clone|repo|github|gh\s+repo|sandbox|workspace|fullstack|command|cmd|shell|bash|terminal|script|python|node|exec|status|check|verify|all|ফুল-স্ট্যাক|ক্লোন|রিপো|গিটহাব|প্রিভিউ|ইমপোর্ট|কমান্ড|টার্মিনাল|প্যাকেজ|স্কিল|সব)/i.test(lower) || /github\.com\//i.test(lower)) {
+  if (!isGreenfield && (/(install|package|npm|react|express|server|backend|api|build|typescript|vite|clone|repo|github|gh\s+repo|sandbox|workspace|fullstack|command|cmd|shell|bash|terminal|script|python|node|exec|status|check|verify|all|ফুল-স্ট্যাক|ক্লোন|রিপো|গিটহাব|প্রিভিউ|ইমপোর্ট|কমান্ড|টার্মিনাল|প্যাকেজ|স্কিল|সব)/i.test(lower) || /github\.com\//i.test(lower))) {
     baseTools.add('analyze_project');
     baseTools.add('find_by_name');
     baseTools.add('install_applet_package');
@@ -1811,6 +1827,10 @@ function selectRelevantTools(
     baseTools.add('workspace_init');
     baseTools.add('workspace_run');
     baseTools.add('github_clone');
+  } else if (isGreenfield) {
+    baseTools.add('workspace_init');
+    baseTools.add('workspace_run');
+    baseTools.add('install_applet_package');
   }
   if (/(delete|remove|rename|move|clean|মুছ|সরাও)/i.test(lower)) {
     baseTools.add('delete_file');
@@ -1887,6 +1907,11 @@ function selectRelevantTools(
       'lintProject', 'restartServer', 'webSearch', 'generateImage', 'installPackage',
       'moveFile', 'fileDelete',
     ]);
+    if (isGreenfield) {
+      blockedTools.add('analyze_project');
+      blockedTools.add('codebase_graph');
+      blockedTools.add('ast_context_ranker');
+    }
     if (!hasExplicitFirebaseIntent) {
       blockedTools.add('set_up_firebase');
       blockedTools.add('deploy_firebase');
@@ -2188,7 +2213,7 @@ function compactJsonSchemaDescriptions(schema: any): any {
   return clone;
 }
 
-type ToolExecutionPhase = 'inspect' | 'build' | 'verify';
+type ToolExecutionPhase = 'greenfield' | 'inspect' | 'build' | 'verify';
 
 function selectPhaseOpenAITools(
   declarations: FunctionDeclaration[],
@@ -2197,8 +2222,18 @@ function selectPhaseOpenAITools(
   phase: ToolExecutionPhase,
   compactSubset: boolean
 ): any[] {
-  const relevant = selectRelevantTools(declarations, promptText, mode, true);
+  const relevant = selectRelevantTools(declarations, promptText, mode, true, phase === 'greenfield');
   const phaseAllowlist: Record<ToolExecutionPhase, Set<string>> = {
+    greenfield: new Set([
+      'plan',
+      'read_skill',
+      'workspace_init',
+      'write_to_file',
+      'install_applet_package',
+      'generate_image',
+      'set_up_firebase',
+      'ask_question',
+    ]),
     inspect: new Set([
       'read_skill',
       'plan',
@@ -2920,8 +2955,11 @@ async function streamOpenAICompatible(
   poolKeys: KeyConfig[] = []
 ): Promise<string> {
   const effectiveExecCtx: ToolExecutionContext = { ...execCtx, compactMode: true };
+  const isFreshGreenfield = await isFreshGreenfieldWebsiteBuild(rawUserPrompt, execCtx?.sessionId);
   let openAiMessages: any[] = convertToOpenAIMessages(messages, mode, systemOptions, enrichedLastMessage, lastMessageImages);
-  let openAiTools = allowTools ? selectPhaseOpenAITools(serverTools, rawUserPrompt, mode, 'inspect', false) : [];
+  let openAiTools = allowTools
+    ? selectPhaseOpenAITools(serverTools, rawUserPrompt, mode, isFreshGreenfield ? 'greenfield' : 'inspect', false)
+    : [];
   let usingCompactTools = false;
   let activeKeyObj = trackedKey;
   let activeEndpoint = endpoint;
@@ -3062,7 +3100,9 @@ async function streamOpenAICompatible(
           ? 'verify'
           : didMutateFiles || Boolean(sharedProgress?.executedTools?.includes('workspace_init'))
             ? 'build'
-            : 'inspect';
+            : isFreshGreenfield
+              ? 'greenfield'
+              : 'inspect';
       openAiTools = selectPhaseOpenAITools(serverTools, rawUserPrompt, mode, currentPhase, usingCompactTools);
     }
 
@@ -3262,7 +3302,9 @@ async function streamOpenAICompatible(
               ? 'verify'
               : didMutateFiles || Boolean(sharedProgress?.executedTools?.includes('workspace_init'))
                 ? 'build'
-                : 'inspect';
+                : isFreshGreenfield
+                  ? 'greenfield'
+                  : 'inspect';
           openAiTools = selectPhaseOpenAITools(serverTools, rawUserPrompt, mode, retryPhase, true);
           sendEvent({
             type: "action",
@@ -3923,8 +3965,9 @@ async function runGeminiAgentLoop(
   isVertexExpress: boolean = false
 ): Promise<string> {
   const isFreeCustomKey = Boolean(trackedKey && trackedKey.id !== 'studio_primary_key');
+  const isFreshGreenfield = await isFreshGreenfieldWebsiteBuild(rawUserPrompt, execCtx?.sessionId);
   const relevantTools = allowTools
-    ? selectRelevantTools(serverTools, rawUserPrompt, mode, false)
+    ? selectRelevantTools(serverTools, rawUserPrompt, mode, false, isFreshGreenfield)
     : [];
 
   const getThinkingConfigForModel = (gModel: string) => {
@@ -4527,7 +4570,7 @@ export async function executeOrchestratedChat(
           lastMessage += `\n\n[ACTIVE SESSION WORKSPACE CONTEXT]:
 Existing modular workspace:
 ${contextNotes.join('\n')}
-When modifying or expanding the current website, FIRST inspect relevant modular files with view_file, then update/add modular files in workspaces/${safeSessId}/ and ensure workspace_run(action: "start") -> /w/${safeSessId}/ is live.`;
+Use the injected [CODEBASE DEPENDENCY GRAPH] and [LOCKED TYPE CONTRACTS] below; only call view_file on the exact file(s) you need to modify (skip package.json/vite.config.ts/index.html unless changing config) inside workspaces/${safeSessId}/ and ensure workspace_run(action: "start") -> /w/${safeSessId}/ is live.`;
         }
 
         // Auto-inject compact Domain Design Brief when building/designing websites or apps

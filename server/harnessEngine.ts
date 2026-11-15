@@ -425,6 +425,16 @@ export function shouldUseModularArchitecture(promptText: string): boolean {
   return isNewAppCreation;
 }
 
+export async function isFreshGreenfieldWebsiteBuild(promptText: string, sessionId?: string): Promise<boolean> {
+  if (!shouldUseModularArchitecture(promptText)) return false;
+  const safeId = (sessionId || 'app').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const wsSrcExists = await fs
+    .access(path.resolve(process.cwd(), 'workspaces', safeId, 'src'))
+    .then(() => true)
+    .catch(() => false);
+  return !wsSrcExists;
+}
+
 // Verified Scaffold & Pattern Library: deterministic architectural blueprints so models don't improvise broken or small file structures
 export function getVerifiedScaffoldBlueprint(promptText: string, sessionId?: string): string | null {
   const lower = (promptText || '').toLowerCase();
@@ -518,32 +528,46 @@ export async function buildHarnessPreFlightContext(
   const safeId = (options.sessionId || 'app').replace(/[^a-zA-Z0-9_-]/g, '_');
 
   try {
-    // 1. Inject installed packages from active workspace or root package.json so models never run redundant npm installs
+    // 1. Inject installed packages & scoped context (skip root codebase AST/graph on fresh greenfield website builds!)
     const isCodeTask = /(src\/|server\/|react|vite|express|component|endpoint|route|typescript|tsx|ts|bug|error|fix|refactor|feature|app|build|create|website|dashboard|firebase|firestore|কোড|ফিক্স|এরর|বানা|তৈরি|ওয়েবসাইট|ফায়ারবেস|ফায়ারবেস)/i.test(promptText);
-    if (isCodeTask) {
-      const wsPkgRel = options.sessionId ? `workspaces/${safeId}/package.json` : 'package.json';
+    const wsSrcExists = options.sessionId
+      ? await fs.access(path.resolve(process.cwd(), 'workspaces', safeId, 'src')).then(() => true).catch(() => false)
+      : false;
+    const isFreshGreenfield = shouldUseModularArchitecture(promptText) && !wsSrcExists;
+
+    if (isFreshGreenfield) {
+      blocks.push(
+        `[GREENFIELD ZERO-READ FAST-PATH (workspaces/${safeId}/)]:\n` +
+        `- Pre-linked starter packages (DO NOT npm install): react, react-dom, lucide-react, clsx, tailwind-merge, motion, express, cors, vite, @vitejs/plugin-react, @tailwindcss/vite.\n` +
+        `- ZERO-READ RULE: This is a brand-new standalone website. Do NOT call list_dir, analyze_project, codebase_graph, grep_search, or view_file on Nexus root files OR starter boilerplate (package.json, vite.config.ts, tsconfig.json, src/main.tsx, src/index.css).\n` +
+        `- Start immediately: plan -> read_skill("frontend-design") -> workspace_init(sessionId: "${safeId}") -> parallel write_to_file(Overwrite: true) calls.`
+      );
+    } else if (isCodeTask) {
+      const wsPkgRel = wsSrcExists && options.sessionId ? `workspaces/${safeId}/package.json` : 'package.json';
       const deps = (await loadPackageDependencySet(wsPkgRel)) || (await loadPackageDependencySet('package.json'));
       if (deps && deps.size > 0) {
         const list = Array.from(deps).filter((d) => !d.startsWith('@types/')).sort().slice(0, 35);
         blocks.push(`[PRE-INSTALLED PACKAGES (DO NOT npm install these)]: ${list.join(', ')}`);
       }
 
-      // 2. AST Context Ranker (top relevant files & exported symbols)
-      const astRank = await rankAstContext(promptText, '.', 5).catch(() => null);
+      // 2. AST Context Ranker scoped to active session workspace when editing an existing workspace
+      const astTargetDir = wsSrcExists && options.sessionId ? `workspaces/${safeId}` : '.';
+      const astRank = await rankAstContext(promptText, astTargetDir, 5).catch(() => null);
       if (astRank && astRank.rankedFiles.length > 0) {
         blocks.push(astRank.formattedContext.slice(0, 1800));
       }
 
       // 3. Compact Dependency Graph summary when modifying codebase files
-      if (/(src\/|server\/|component|endpoint|route|refactor|fix|bug|import|নেক্সাস|কোড)/i.test(promptText)) {
-        const graph = await buildCodebaseGraph('src').catch(() => null);
+      if (/(src\/|server\/|component|endpoint|route|refactor|fix|bug|import|নেক্সাস|কোড)/i.test(promptText) || wsSrcExists) {
+        const graphTarget = wsSrcExists && options.sessionId ? `workspaces/${safeId}/src` : 'src';
+        const graph = await buildCodebaseGraph(graphTarget).catch(() => null);
         if (graph && Array.isArray(graph.nodes) && graph.nodes.length > 0) {
           const summary = graph.nodes
             .slice(0, 12)
             .map((n) => `${n.file} [imports: ${n.imports.slice(0, 4).join(', ') || 'none'} | exports: ${n.exports.slice(0, 4).join(', ') || 'none'}]`)
             .join('; ');
           if (summary) {
-            blocks.push(`[CODEBASE DEPENDENCY GRAPH (src/)]: ${summary}`);
+            blocks.push(`[CODEBASE DEPENDENCY GRAPH (${graphTarget}/)]: ${summary}`);
           }
         }
       }
@@ -552,7 +576,7 @@ export async function buildHarnessPreFlightContext(
       const wsBaseRel = options.sessionId ? `workspaces/${safeId}` : '';
       const typeCandidates = [
         ...(wsBaseRel ? [`${wsBaseRel}/src/types.ts`, `${wsBaseRel}/src/types/index.ts`] : []),
-        'src/types.ts',
+        ...(!wsSrcExists ? ['src/types.ts'] : []),
       ];
       for (const tc of typeCandidates) {
         try {
