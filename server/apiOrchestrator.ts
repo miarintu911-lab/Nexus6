@@ -1374,6 +1374,7 @@ export async function testApiKey(
 export { autoDeployWebsiteFromText, prepareGeminiHistoryAndLastMessage } from "./websiteDeployer.ts";
 
 export type ActionStepKind = 'thought' | 'command' | 'read' | 'edit' | 'build' | 'qc' | 'restart' | 'respond' | 'agent';
+export type AgentRole = 'architect' | 'coder' | 'debugger';
 
 export function emitActionStep(
   sendEvent: (data: any) => void,
@@ -1382,6 +1383,7 @@ export function emitActionStep(
   detail?: string,
   options?: {
     id?: string;
+    agentRole?: AgentRole;
     status?: 'running' | 'done' | 'error';
     toolName?: string;
     filePath?: string;
@@ -1396,6 +1398,7 @@ export function emitActionStep(
       id: stepId,
       kind,
       label,
+      agentRole: options?.agentRole,
       detail,
       status: options?.status || 'done',
       toolName: options?.toolName,
@@ -1406,6 +1409,33 @@ export function emitActionStep(
     }
   });
   return stepId;
+}
+
+function inferToolAgentRole(toolName: string, kind: ActionStepKind): AgentRole {
+  if (
+    [
+      'compile_applet', 'compileProject', 'lint_applet', 'lintProject',
+      'debug_error_analysis', 'targeted_error_context', 'api_contract_checker',
+      'verify_live_preview', 'visual_qa_review', 'code_execution_sandbox',
+      'run_tests', 'detect_secrets', 'claw_doctor',
+    ].includes(toolName) || kind === 'qc'
+  ) {
+    return 'debugger';
+  }
+  if (
+    [
+      'write_to_file', 'fileWrite', 'replace_file_content', 'fileEdit',
+      'multi_replace_file_content', 'delete_file', 'fileDelete', 'delete_dir',
+      'move', 'moveFile', 'install_applet_package', 'installPackage',
+      'install_applet_dependencies', 'generate_image', 'generateImage',
+      'set_up_firebase', 'deploy_firebase', 'github_clone', 'workspace_run',
+      'restart_dev_server', 'restartServer', 'focus_mode', 'figma_import',
+      'cloudsql_update_schema',
+    ].includes(toolName) || kind === 'edit' || kind === 'restart'
+  ) {
+    return 'coder';
+  }
+  return 'architect';
 }
 
 function mapToolToActionStep(toolName: string, args: any): { kind: ActionStepKind; label: string; detail: string; filePath?: string } {
@@ -1587,12 +1617,14 @@ async function executeToolWithLiveEvents(
   execCtx: ToolExecutionContext
 ): Promise<any> {
   const mapped = mapToolToActionStep(callName, callArgs);
+  const agentRole = inferToolAgentRole(callName, mapped.kind);
   const stepId = `step_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const startTime = Date.now();
 
   // Emit live "running" step immediately before execution
   emitActionStep(sendEvent, mapped.kind, mapped.label, mapped.detail, {
     id: stepId,
+    agentRole,
     status: 'running',
     toolName: callName,
     filePath: mapped.filePath,
@@ -1616,6 +1648,7 @@ async function executeToolWithLiveEvents(
     hasError ? String(toolResult?.error || toolResult?.message || mapped.detail).slice(0, 140) : mapped.detail,
     {
       id: stepId,
+      agentRole,
       status: hasError ? 'error' : 'done',
       toolName: callName,
       filePath: toolResult?.cleanPath || mapped.filePath,
@@ -2588,7 +2621,7 @@ async function runMandatorySelfHealingGate(
     'qc',
     'Self-Healing Gate: verifying types, build & runtime preview',
     files.slice(0, 4).join(', '),
-    { status: 'running' }
+    { status: 'running', agentRole: 'debugger' }
   );
   const start = Date.now();
   const failures: string[] = [];
@@ -4879,6 +4912,7 @@ MANDATORY WEBSITE REPLICATION GUIDELINES:
       onAgentStep: (agentStep) => {
         emitActionStep(sendEvent, agentStep.kind, agentStep.label, agentStep.detail, {
           id: agentStep.id,
+          agentRole: agentStep.agentRole,
           status: agentStep.status,
           durationSec: agentStep.durationSec,
           isError: agentStep.status === 'error',

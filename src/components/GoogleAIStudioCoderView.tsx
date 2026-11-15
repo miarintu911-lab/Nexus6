@@ -49,6 +49,7 @@ import {
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { ActionHistoryAccordion } from './ActionHistoryAccordion';
+import { AgentStatusStrip } from './AgentStatusStrip';
 import { PWAInstallButton } from './PWAInstallButton';
 import { ActionStep } from '../types/secrets';
 import { getLocalKeys } from '../lib/secretsManager';
@@ -1009,6 +1010,7 @@ export const GoogleAIStudioCoderView: React.FC<GoogleAIStudioCoderViewProps> = (
                                       : 'Done'
                             }
                             defaultExpanded={isLatestStreamingModel}
+                            multiAgent={multiAgent}
                           />
                         )}
 
@@ -1114,6 +1116,7 @@ export const GoogleAIStudioCoderView: React.FC<GoogleAIStudioCoderViewProps> = (
                     modelName={currentActiveKeyInfo?.model || (effectiveModel === 'Default' ? 'Gemini 3.8 Flash' : effectiveModel)}
                     durationText={formatDuration(executionDuration)}
                     defaultExpanded={true}
+                    multiAgent={multiAgent}
                   />
                 </div>
               )}
@@ -1149,7 +1152,18 @@ export const GoogleAIStudioCoderView: React.FC<GoogleAIStudioCoderViewProps> = (
             </div>
 
             {/* Input Card Container matching screenshot */}
-            <div className="px-4 py-3 bg-[#131314] flex-shrink-0">
+            <div className="px-4 py-3 bg-[#131314] flex-shrink-0 space-y-2">
+              {multiAgent && (
+                <div className="max-w-2xl mx-auto">
+                  <AgentStatusStrip
+                    steps={actionSteps}
+                    isLoading={isLoading}
+                    actionLog={actionLog}
+                    activeModel={currentActiveKeyInfo?.model || (effectiveModel === 'Default' ? 'Gemini 3.8 Flash' : effectiveModel)}
+                    variant="bar"
+                  />
+                </div>
+              )}
               <div className="max-w-2xl mx-auto bg-[#1e2024] border border-slate-700/60 rounded-3xl p-3 shadow-2xl flex flex-col gap-2">
                 {attachedImage && (
                   <div className="flex items-center gap-2 px-1.5 pt-1">

@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { ActionStep } from '../types/secrets';
 import { cn } from '../lib/utils';
+import { AgentStatusStrip } from './AgentStatusStrip';
+import { inferStepAgentRole } from '../lib/agentStatus';
 
 export const DEFAULT_STUDIO_STEPS: ActionStep[] = [];
 
@@ -24,6 +26,7 @@ export interface ActionHistoryAccordionProps {
   modelName: string;
   durationText: string;
   defaultExpanded?: boolean;
+  multiAgent?: boolean;
 }
 
 export const ActionHistoryAccordion: React.FC<ActionHistoryAccordionProps> = ({
@@ -33,6 +36,7 @@ export const ActionHistoryAccordion: React.FC<ActionHistoryAccordionProps> = ({
   modelName,
   durationText,
   defaultExpanded,
+  multiAgent = false,
 }) => {
   const [isOpen, setIsOpen] = useState(defaultExpanded !== undefined ? defaultExpanded : isLoading);
 
@@ -109,6 +113,10 @@ export const ActionHistoryAccordion: React.FC<ActionHistoryAccordionProps> = ({
       {/* Expanded Accordion Body */}
       {isOpen && (
         <div className="px-4 py-3.5 border-t border-slate-800/80 space-y-3.5 bg-[#0b101d]">
+          {multiAgent && (
+            <AgentStatusStrip steps={steps} isLoading={isLoading} variant="compact" />
+          )}
+
           <div className="text-[11px] text-slate-300 font-medium flex items-center justify-between">
             <span>Here are key actions taken for the app:</span>
             {isLoading && (
@@ -155,6 +163,12 @@ export const ActionHistoryAccordion: React.FC<ActionHistoryAccordionProps> = ({
                   </div>
                   <div className="flex-1 overflow-hidden">
                     <div className="flex items-center gap-2">
+                      {multiAgent && step.kind !== 'respond' && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 flex-shrink-0">
+                          {inferStepAgentRole(step)}
+                          <span aria-hidden="true" className="ml-1 text-slate-600">·</span>
+                        </span>
+                      )}
                       <span className={cn(
                         "font-medium truncate",
                         step.status === 'running' ? "text-sky-200" : step.isError ? "text-rose-200" : "text-slate-200"

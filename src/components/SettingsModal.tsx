@@ -5,11 +5,9 @@ import {
   Key, 
   Github, 
   Flame, 
-  Globe, 
-  Sparkles, 
   ChevronRight,
-  ShieldCheck,
-  Cpu
+  Cpu,
+  Bot
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -18,6 +16,8 @@ interface SettingsModalProps {
   onOpenSecrets: () => void;
   onOpenGitHub: () => void;
   onOpenFirebase: () => void;
+  multiAgent?: boolean;
+  onToggleMultiAgent?: (enabled: boolean) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -26,6 +26,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenSecrets,
   onOpenGitHub,
   onOpenFirebase,
+  multiAgent = true,
+  onToggleMultiAgent,
 }) => {
   if (!isOpen) return null;
 
@@ -45,7 +47,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
           <button 
             onClick={onClose}
-            className="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors"
+            className="w-8 h-8 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -53,6 +55,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Settings Links */}
         <div className="p-5 space-y-2.5 text-xs">
+          {onToggleMultiAgent && (
+            <div className="w-full p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-violet-500/20 text-violet-400 flex items-center justify-center flex-shrink-0">
+                  <Bot className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-bold text-white flex items-center gap-2">
+                    <span>Multi-Agent Orchestration</span>
+                    <span className="text-[10px] font-medium text-slate-400">
+                      {multiAgent ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 truncate">
+                    Live status for Architect · Coder · Debugger
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={multiAgent}
+                aria-label="Toggle Multi-Agent Orchestration"
+                onClick={() => onToggleMultiAgent(!multiAgent)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+                  multiAgent ? 'bg-violet-600' : 'bg-slate-700'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+                    multiAgent ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          )}
+
           <button
             onClick={() => { onClose(); onOpenSecrets(); }}
             className="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 flex items-center justify-between transition-all group text-left cursor-pointer"

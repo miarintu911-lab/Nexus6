@@ -100,6 +100,7 @@ export interface ToolExecutionContext {
     id: string;
     kind: 'agent' | 'thought' | 'qc' | 'command';
     label: string;
+    agentRole?: 'architect' | 'coder' | 'debugger';
     detail?: string;
     status: 'running' | 'done' | 'error';
     durationSec?: number;
@@ -1451,6 +1452,7 @@ export async function runOmoCoordinate(
   execCtx?.onAgentStep?.({
     id: archStepId,
     kind: 'agent',
+    agentRole: 'architect',
     label: execCtx?.compactMode
       ? 'Architect + Executor Sub-Agent designing modular plan (Pooled Key)'
       : 'Architect Agent designing architecture (Parallel Pool)',
@@ -1460,6 +1462,7 @@ export async function runOmoCoordinate(
   execCtx?.onAgentStep?.({
     id: revStepId,
     kind: 'qc',
+    agentRole: 'debugger',
     label: isFreshGreenfieldWs
       ? 'Reviewer Agent armed (Greenfield pre-flight)'
       : 'Reviewer Agent checking TypeScript baseline (Parallel)',
@@ -1495,6 +1498,7 @@ export async function runOmoCoordinate(
     execCtx?.onAgentStep?.({
       id: archStepId,
       kind: 'agent',
+      agentRole: 'architect',
       label: 'Architect + Executor aligned (1-shot pooled handoff)',
       detail: architectOutput.slice(0, 140),
       status: 'done',
@@ -1517,6 +1521,7 @@ export async function runOmoCoordinate(
     execCtx?.onAgentStep?.({
       id: revStepId,
       kind: 'qc',
+      agentRole: 'debugger',
       label: tscOutcome.clean ? 'Reviewer Agent armed (0 baseline errors)' : 'Reviewer Agent captured TS baseline diagnostics',
       detail: tscOutcome.summary.slice(0, 120),
       status: 'done',
@@ -1557,6 +1562,7 @@ export async function runOmoCoordinate(
   execCtx?.onAgentStep?.({
     id: archStepId,
     kind: 'agent',
+    agentRole: 'architect',
     label: 'Architect Agent completed design',
     detail: architectOutput.slice(0, 140),
     status: 'done',
@@ -1575,6 +1581,7 @@ export async function runOmoCoordinate(
   execCtx?.onAgentStep?.({
     id: execStepId,
     kind: 'agent',
+    agentRole: 'coder',
     label: 'Executor Agent mapping file operations',
     detail: 'Preparing surgical file tool calls',
     status: 'running',
@@ -1590,6 +1597,7 @@ export async function runOmoCoordinate(
   execCtx?.onAgentStep?.({
     id: execStepId,
     kind: 'agent',
+    agentRole: 'coder',
     label: 'Executor Agent mapped implementation',
     detail: executorOutput.slice(0, 140),
     status: 'done',
@@ -1606,6 +1614,7 @@ export async function runOmoCoordinate(
   execCtx?.onAgentStep?.({
     id: revStepId,
     kind: 'qc',
+    agentRole: 'debugger',
     label: tscClean ? 'Reviewer Agent verified baseline (0 errors)' : 'Reviewer Agent captured TS baseline diagnostics',
     detail: tscClean ? 'Ready for post-edit verification' : tscSummary.slice(0, 120),
     status: 'done',

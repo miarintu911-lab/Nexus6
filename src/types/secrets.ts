@@ -1,7 +1,10 @@
+export type AgentRole = 'architect' | 'coder' | 'debugger';
+
 export interface ActionStep {
   id: string;
   kind: 'command' | 'thought' | 'tool' | 'file' | 'read' | 'edit' | 'build' | 'qc' | 'restart' | 'respond' | 'agent';
   label: string;
+  agentRole?: AgentRole;
   status?: 'running' | 'done' | 'error';
   toolName?: string;
   filePath?: string;

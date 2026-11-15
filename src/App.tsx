@@ -74,6 +74,7 @@ import { LogsModal } from './components/LogsModal';
 import { AskQuestionModal, PendingQuestionPrompt } from './components/AskQuestionModal';
 import { SidebarDrawer } from './components/SidebarDrawer';
 import { GoogleAIStudioCoderView } from './components/GoogleAIStudioCoderView';
+import { AgentStatusStrip } from './components/AgentStatusStrip';
 import { getLocalKeys } from './lib/secretsManager';
 import { ActionStep } from './types/secrets';
 import { 
@@ -201,7 +202,19 @@ export default function App() {
   const [developerPersona, setDeveloperPersona] = useState<string>('');
   const [customSystemInstruction, setCustomSystemInstruction] = useState<string>('');
   const [outputFormat, setOutputFormat] = useState<'auto' | 'markdown' | 'json'>('auto');
-  const [multiAgent, setMultiAgent] = useState<boolean>(true);
+  const [multiAgent, setMultiAgentState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('nexus_multi_agent_enabled') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const setMultiAgent = (enabled: boolean) => {
+    setMultiAgentState(enabled);
+    try {
+      localStorage.setItem('nexus_multi_agent_enabled', enabled ? 'true' : 'false');
+    } catch {}
+  };
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [selectedArtifact, setSelectedArtifact] = useState<string>('projects/index.html');
@@ -1452,6 +1465,8 @@ export default function App() {
           onOpenSecrets={() => setShowSecretsModal(true)}
           onOpenGitHub={() => setShowGitHubModal(true)}
           onOpenFirebase={() => setShowFirebaseModal(true)}
+          multiAgent={multiAgent}
+          onToggleMultiAgent={setMultiAgent}
         />
 
         <SecretsModal
@@ -1738,7 +1753,18 @@ export default function App() {
                       Active Orchestration
                     </span>
                   </div>
-                  
+
+                  {multiAgent && (
+                    <AgentStatusStrip
+                      steps={actionSteps}
+                      isLoading={isLoading}
+                      actionLog={actionLog}
+                      activeModel={currentActiveKeyInfo?.model || selectedModel}
+                      variant="compact"
+                      className="mb-3"
+                    />
+                  )}
+
                   <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-none font-mono text-xs">
                     {activityLogs.map((log, idx) => (
                       <div key={idx} className="flex items-start gap-2.5 text-slate-400">
@@ -2229,6 +2255,8 @@ export default function App() {
         onOpenSecrets={() => setShowSecretsModal(true)}
         onOpenGitHub={() => setShowGitHubModal(true)}
         onOpenFirebase={() => setShowFirebaseModal(true)}
+        multiAgent={multiAgent}
+        onToggleMultiAgent={setMultiAgent}
       />
 
       <SecretsModal
