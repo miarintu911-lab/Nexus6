@@ -1415,21 +1415,34 @@ export async function runOmoCoordinate(
     return null;
   };
 
-  // Gather real workspace context for sub-agents
+  // Gather workspace context scoped to active session workspace (never leak Nexus root on fresh greenfield builds)
+  const safeSessionId = execCtx?.sessionId ? execCtx.sessionId.replace(/[^a-zA-Z0-9_-]/g, '_') : '';
+  const wsDir = safeSessionId ? path.resolve(process.cwd(), 'workspaces', safeSessionId) : '';
+  const wsSrcExists = wsDir
+    ? await fs.access(path.join(wsDir, 'src')).then(() => true).catch(() => false)
+    : false;
+  const isFreshGreenfieldWs = Boolean(safeSessionId) && !wsSrcExists && !/(server\/|src\/|apiOrchestrator|GoogleAIStudioCoderView)/i.test(`${task} ${context || ''}`);
+
   let workspaceSnapshot = '';
   try {
-    const pkgRaw = await fs.readFile(path.resolve(process.cwd(), 'package.json'), 'utf-8').catch(() => '');
-    const pkgName = pkgRaw ? JSON.parse(pkgRaw).name : 'workspace';
-    const topEntries = await fs.readdir(process.cwd(), { withFileTypes: true });
-    const topList = topEntries
-      .filter(e => !['node_modules', '.git', 'dist'].includes(e.name))
-      .map(e => (e.isDirectory() ? `${e.name}/` : e.name))
-      .slice(0, 30)
-      .join(', ');
-    workspaceSnapshot = `Project: ${pkgName}\nTop-level entries: ${topList}`;
+    if (isFreshGreenfieldWs) {
+      workspaceSnapshot = `Target: Fresh greenfield sandbox workspaces/${safeSessionId}/ (React 19 + Vite + Tailwind v4 + lucide-react + motion pre-linked).`;
+    } else {
+      const targetRoot = wsSrcExists && wsDir ? wsDir : process.cwd();
+      const pkgRaw = await fs.readFile(path.join(targetRoot, 'package.json'), 'utf-8').catch(() => '');
+      const pkgName = pkgRaw ? JSON.parse(pkgRaw).name : 'workspace';
+      const topEntries = await fs.readdir(targetRoot, { withFileTypes: true });
+      const topList = topEntries
+        .filter(e => !['node_modules', '.git', 'dist'].includes(e.name))
+        .map(e => (e.isDirectory() ? `${e.name}/` : e.name))
+        .slice(0, 25)
+        .join(', ');
+      workspaceSnapshot = `Project: ${pkgName} (${wsSrcExists ? `workspaces/${safeSessionId}` : 'root'})\nEntries: ${topList}`;
+    }
   } catch {}
 
   const phases: Array<{ agent: string; role: string; status: string; output: string }> = [];
+  const tscCwd = wsSrcExists && wsDir ? wsDir : process.cwd();
 
   // Run Phase 1 (Architect LLM on pooled spare key) + Reviewer Baseline tsc --noEmit in parallel!
   const archStepId = `omo_arch_${Date.now()}`;
@@ -1438,17 +1451,94 @@ export async function runOmoCoordinate(
   execCtx?.onAgentStep?.({
     id: archStepId,
     kind: 'agent',
-    label: 'Architect Agent designing architecture (Parallel Pool)',
+    label: execCtx?.compactMode
+      ? 'Architect + Executor Sub-Agent designing modular plan (Pooled Key)'
+      : 'Architect Agent designing architecture (Parallel Pool)',
     detail: task.slice(0, 120),
     status: 'running',
   });
   execCtx?.onAgentStep?.({
     id: revStepId,
     kind: 'qc',
-    label: 'Reviewer Agent checking TypeScript baseline (Parallel)',
-    detail: 'npx tsc --noEmit',
+    label: isFreshGreenfieldWs
+      ? 'Reviewer Agent armed (Greenfield pre-flight)'
+      : 'Reviewer Agent checking TypeScript baseline (Parallel)',
+    detail: isFreshGreenfieldWs ? 'Zero-read fast-path ready' : 'npx tsc --noEmit',
     status: 'running',
   });
+
+  const runTscBaseline = isFreshGreenfieldWs
+    ? Promise.resolve({ clean: true, summary: 'Fresh greenfield workspace — baseline TS check skipped until files are written.' })
+    : execPromise('npx tsc --noEmit', { cwd: tscCwd, timeout: 15000 })
+        .then(() => ({ clean: true, summary: 'TypeScript check clean (0 errors).' }))
+        .catch((err: any) => ({
+          clean: false,
+          summary: (err.stdout || err.stderr || err.message || 'TS errors detected').trim().slice(0, 400),
+        }));
+
+  if (execCtx?.compactMode) {
+    // Token-saving 1-shot Architect+Executor synthesis for free APIs (cuts LLM calls in half)
+    const compactPrompt = `Task: ${task}\n${context ? `Context: ${context.slice(0, 400)}\n` : ''}${workspaceSnapshot}\nOutput two ultra-concise sections (<150 words total):\nARCHITECT: exact types/interfaces, component boundaries & data flow.\nEXECUTOR: exact file paths to write/edit in parallel (e.g. src/types.ts, src/data/*, src/components/*, src/pages/*, src/App.tsx).`;
+    const [combinedOut, tscOutcome] = await Promise.all([
+      invokeAgentLLM(
+        'You are the Architect + Executor Sub-Agent. Output ultra-concise file targets, shared type contracts, and parallel write order only — never dump code.',
+        compactPrompt
+      ),
+      runTscBaseline,
+    ]);
+
+    const rawText = combinedOut || `ARCHITECT & EXECUTOR plan for "${task}": target ${isFreshGreenfieldWs ? `workspaces/${safeSessionId}/` : 'workspace'} -> write src/types.ts, src/data/seed.ts, modular components/pages, and src/App.tsx.`;
+    const execSplit = rawText.split(/\bEXECUTOR\s*:/i);
+    const architectOutput = (execSplit[0] || rawText).replace(/^ARCHITECT\s*:/i, '').trim();
+    const executorOutput = (execSplit[1] || rawText).trim();
+
+    execCtx?.onAgentStep?.({
+      id: archStepId,
+      kind: 'agent',
+      label: 'Architect + Executor aligned (1-shot pooled handoff)',
+      detail: architectOutput.slice(0, 140),
+      status: 'done',
+      durationSec: Math.max(0.1, Number(((Date.now() - archStart) / 1000).toFixed(1))),
+    });
+    phases.push({
+      agent: 'Architect',
+      role: 'System Design & Specification',
+      status: 'completed',
+      output: architectOutput,
+    });
+    phases.push({
+      agent: 'Executor',
+      role: 'Code Generation & File Tool Directives',
+      status: 'ready',
+      output: executorOutput,
+    });
+
+    const reviewerOutput = `Baseline tsc --noEmit: ${tscOutcome.clean ? 'CLEAN' : 'ISSUES FOUND'} (${tscOutcome.summary}). Post-edit verification will re-run compile_applet + lint_applet before final report.`;
+    execCtx?.onAgentStep?.({
+      id: revStepId,
+      kind: 'qc',
+      label: tscOutcome.clean ? 'Reviewer Agent armed (0 baseline errors)' : 'Reviewer Agent captured TS baseline diagnostics',
+      detail: tscOutcome.summary.slice(0, 120),
+      status: 'done',
+      durationSec: Math.max(0.1, Number(((Date.now() - archStart) / 1000).toFixed(1))),
+    });
+    phases.push({
+      agent: 'Reviewer',
+      role: 'Quality Assurance & Compiler Verification',
+      status: tscOutcome.clean ? 'armed' : 'diagnostics_captured',
+      output: reviewerOutput,
+    });
+
+    return {
+      coordinator: 'OmO Compact Multi-Agent Orchestrator (Architect+Executor -> Reviewer)',
+      task,
+      workspaceSnapshot,
+      subAgents,
+      consensusStatus: 'consensus_achieved',
+      coordinationPhases: phases,
+      handoffDirective: `Architect & Executor aligned in 1-shot compact handoff. Immediately execute parallel write_to_file / replace_file_content calls (do NOT re-read starter files), then verify.`,
+    };
+  }
 
   const architectPrompt = `Task: ${task}\n${context ? `Context: ${context}\n` : ''}${workspaceSnapshot}\nProvide a concise, concrete architectural specification (target files, components/routes, data flow, and verification criteria). Keep it under 180 words.`;
 
@@ -1457,12 +1547,7 @@ export async function runOmoCoordinate(
       'You are the Architect Sub-Agent in a multi-agent engineering pipeline. Output concrete file targets, contracts, and architecture only.',
       architectPrompt
     ),
-    execPromise('npx tsc --noEmit', { cwd: process.cwd(), timeout: 15000 })
-      .then(() => ({ clean: true, summary: 'TypeScript check clean (0 errors).' }))
-      .catch((err: any) => ({
-        clean: false,
-        summary: (err.stdout || err.stderr || err.message || 'TS errors detected').trim().slice(0, 400),
-      })),
+    runTscBaseline,
   ]);
 
   const architectOutput = architectLLMOut || `Architectural plan for "${task}": inspected ${workspaceSnapshot || 'workspace'}. Decomposed into target file edits, types, and UI/API wiring.`;

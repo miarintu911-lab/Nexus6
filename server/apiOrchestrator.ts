@@ -1779,7 +1779,8 @@ function selectRelevantTools(
   promptText: string,
   mode: string,
   compactMode: boolean,
-  isGreenfield: boolean = false
+  isGreenfield: boolean = false,
+  enableMultiAgentOmo: boolean = false
 ): FunctionDeclaration[] {
   const baseTools = new Set(
     isGreenfield
@@ -1845,6 +1846,9 @@ function selectRelevantTools(
     baseTools.add('run_tests');
     baseTools.add('git_rollback');
     baseTools.add('detect_secrets');
+  }
+  if (enableMultiAgentOmo) {
+    baseTools.add('omo_coordinate');
   }
   if (/(agent|multi|omo|omx|claw|lazycodex|autonomous|orchestrat|মাল্টি|এজেন্ট)/i.test(lower)) {
     baseTools.add('omo_coordinate');
@@ -2220,9 +2224,10 @@ function selectPhaseOpenAITools(
   promptText: string,
   mode: string,
   phase: ToolExecutionPhase,
-  compactSubset: boolean
+  compactSubset: boolean,
+  enableMultiAgentOmo: boolean = false
 ): any[] {
-  const relevant = selectRelevantTools(declarations, promptText, mode, true, phase === 'greenfield');
+  const relevant = selectRelevantTools(declarations, promptText, mode, true, phase === 'greenfield', enableMultiAgentOmo);
   const phaseAllowlist: Record<ToolExecutionPhase, Set<string>> = {
     greenfield: new Set([
       'plan',
@@ -2233,6 +2238,7 @@ function selectPhaseOpenAITools(
       'generate_image',
       'set_up_firebase',
       'ask_question',
+      ...(enableMultiAgentOmo ? ['omo_coordinate'] : []),
     ]),
     inspect: new Set([
       'read_skill',
@@ -2247,6 +2253,7 @@ function selectPhaseOpenAITools(
       'ask_question',
       'search_web',
       'write_to_file',
+      ...(enableMultiAgentOmo ? ['omo_coordinate'] : []),
     ]),
     build: new Set([
       'write_to_file',
@@ -2835,7 +2842,12 @@ async function runMandatorySelfHealingGate(
     ) {
       if (harnessCtx.sharedProgress) harnessCtx.sharedProgress.criticRan = true;
       const criticCandidates = harnessCtx.poolKeys.filter(
-        (k) => k.isActive && k.id !== harnessCtx.activeKeyId && getOrCreateStats(k.id).cooldownUntil <= Date.now()
+        (k) =>
+          k.isActive &&
+          k.id !== harnessCtx.activeKeyId &&
+          k.provider !== 'groq' &&
+          getKeyEffectiveCaps(k).rawTpmLimit > 8000 &&
+          getOrCreateStats(k.id).cooldownUntil <= Date.now()
       );
       const { key: criticKey } = selectBestKey(criticCandidates, 'all', new Set(), null, {
         loadBalance: true,
@@ -2956,9 +2968,21 @@ async function streamOpenAICompatible(
 ): Promise<string> {
   const effectiveExecCtx: ToolExecutionContext = { ...execCtx, compactMode: true };
   const isFreshGreenfield = await isFreshGreenfieldWebsiteBuild(rawUserPrompt, execCtx?.sessionId);
-  let openAiMessages: any[] = convertToOpenAIMessages(messages, mode, systemOptions, enrichedLastMessage, lastMessageImages);
+  const isLowTpmGroqKey = (k?: KeyConfig, ep?: string): boolean =>
+    k?.provider === 'groq' ||
+    (ep || '').includes('api.groq.com') ||
+    (k ? getKeyEffectiveCaps(k).rawTpmLimit <= 8000 : false);
+  const initialIsLowTpmGroq = isLowTpmGroqKey(trackedKey, endpoint);
+  const effectiveSystemOptions: SystemInstructionOptions = initialIsLowTpmGroq
+    ? { ...systemOptions, multiAgent: false }
+    : systemOptions;
+  const initialEnableOmo =
+    Boolean(systemOptions.multiAgent) &&
+    !initialIsLowTpmGroq &&
+    isActionOrBuildPrompt(rawUserPrompt);
+  let openAiMessages: any[] = convertToOpenAIMessages(messages, mode, effectiveSystemOptions, enrichedLastMessage, lastMessageImages);
   let openAiTools = allowTools
-    ? selectPhaseOpenAITools(serverTools, rawUserPrompt, mode, isFreshGreenfield ? 'greenfield' : 'inspect', false)
+    ? selectPhaseOpenAITools(serverTools, rawUserPrompt, mode, isFreshGreenfield ? 'greenfield' : 'inspect', false, initialEnableOmo)
     : [];
   let usingCompactTools = false;
   let activeKeyObj = trackedKey;
@@ -3103,7 +3127,15 @@ async function streamOpenAICompatible(
             : isFreshGreenfield
               ? 'greenfield'
               : 'inspect';
-      openAiTools = selectPhaseOpenAITools(serverTools, rawUserPrompt, mode, currentPhase, usingCompactTools);
+      const omoAlreadyRan = Boolean(sharedProgress?.executedTools?.includes('omo_coordinate'));
+      const enableOmoThisRound =
+        Boolean(systemOptions.multiAgent) &&
+        !isLowTpmGroqKey(activeKeyObj, activeEndpoint) &&
+        !usingCompactTools &&
+        !didMutateFiles &&
+        !omoAlreadyRan &&
+        isActionOrBuildPrompt(rawUserPrompt);
+      openAiTools = selectPhaseOpenAITools(serverTools, rawUserPrompt, mode, currentPhase, usingCompactTools, enableOmoThisRound);
     }
 
     let compactedMessages = compactOpenAIMessages(currentMessages, sharedProgress?.mutatedFiles);
@@ -3305,7 +3337,7 @@ async function streamOpenAICompatible(
                 : isFreshGreenfield
                   ? 'greenfield'
                   : 'inspect';
-          openAiTools = selectPhaseOpenAITools(serverTools, rawUserPrompt, mode, retryPhase, true);
+          openAiTools = selectPhaseOpenAITools(serverTools, rawUserPrompt, mode, retryPhase, true, false);
           sendEvent({
             type: "action",
             action: `⚡ ${candidateModel} TPM/payload limit — auto-compacting to ${openAiTools.length} phase-focused tools...`,
@@ -3966,8 +3998,9 @@ async function runGeminiAgentLoop(
 ): Promise<string> {
   const isFreeCustomKey = Boolean(trackedKey && trackedKey.id !== 'studio_primary_key');
   const isFreshGreenfield = await isFreshGreenfieldWebsiteBuild(rawUserPrompt, execCtx?.sessionId);
+  const enableMultiAgentOmo = Boolean(systemOptions.multiAgent) && isActionOrBuildPrompt(rawUserPrompt);
   const relevantTools = allowTools
-    ? selectRelevantTools(serverTools, rawUserPrompt, mode, false, isFreshGreenfield)
+    ? selectRelevantTools(serverTools, rawUserPrompt, mode, false, isFreshGreenfield, enableMultiAgentOmo)
     : [];
 
   const getThinkingConfigForModel = (gModel: string) => {
@@ -4867,6 +4900,8 @@ MANDATORY WEBSITE REPLICATION GUIDELINES:
           k.isActive &&
           k.id !== primaryKey.id &&
           k.id !== 'studio_primary_key' &&
+          k.provider !== 'groq' &&
+          getKeyEffectiveCaps(k).rawTpmLimit > 8000 &&
           getOrCreateStats(k.id).cooldownUntil <= Date.now()
         );
         if (spareCandidates.length > 0) {

@@ -58,6 +58,9 @@ For any non-trivial coding or app-building request, FIRST call \`omo_coordinate\
     : 'projects/index.html';
 
   if (options.compactForFreeApi) {
+    const compactMultiAgentLine = options.multiAgent
+      ? `\n6. MULTI-AGENT (OmO): When \`omo_coordinate\` is available on a new multi-file build, call it once before writing files so Architect/Executor/Reviewer align (skip for simple edits).`
+      : '';
     return `You are Nexus AI, a senior full-stack software engineer & product designer following the exact Google AI Studio Build workflow. Mode: ${mode}${personaSection}${customSection}${outputFormatSection}
 
 CORE 5-PHASE AUTONOMOUS WORKFLOW:
@@ -72,7 +75,7 @@ CORE 5-PHASE AUTONOMOUS WORKFLOW:
    - For editing the existing project or fixing bugs: use surgical \`replace_file_content\` / \`multi_replace_file_content\` edits without breaking unrelated working code.
    - NEVER dump full source files or \`{"tool_calls":...}\` JSON into chat, and NEVER leave \`// TODO\` or \`// ... existing code\` placeholders.
 4. MANDATORY DUAL VERIFICATION: After edits, run \`compile_applet\` + \`lint_applet\` (plus \`api_contract_checker\` for full-stack apps and \`targeted_error_context\` on any compiler error), or \`workspace_run(action: 'start')\` + \`verify_live_preview('/w/${options.sessionId || 'app'}/')\`. Fix all errors before finishing.
-5. CONCISE SUMMARY: Reply concisely in the user's language (Bengali if user wrote in Bengali) summarizing only what was built/fixed and verified.`;
+5. CONCISE SUMMARY: Reply concisely in the user's language (Bengali if user wrote in Bengali) summarizing only what was built/fixed and verified.${compactMultiAgentLine}`;
   }
 
   return `You are the coding engine behind Google AI Studio Build. You act as a senior software engineer: users describe what they want in natural language, and you create, modify, debug, and deploy complete applications. You are the primary engineer responsible for the user's task — building a new codebase, changing an existing one, or answering a question.
